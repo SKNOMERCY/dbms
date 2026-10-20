@@ -46,13 +46,15 @@ This project helped me practice connecting database integrity, model evaluation,
 
 ## Dashboard screenshot checklist
 
-The checked-in Streamlit AppTest covers the recoverable database-connection failure path. The main views were not visually inspected in a browser in this environment, so no dashboard screenshot is included. After launching the app locally and loading the sample database, capture real screenshots under `docs/screenshots/` and link them from `README.md`:
+Five sample-data screenshots are included in [`README.md`](README.md#dashboard-screenshots) and stored in `docs/screenshots/`:
 
-1. `docs/screenshots/01-overview.png` — overview with shared filter context, KPI rows, and chart titles visible.
-2. `docs/screenshots/02-transactions.png` — transactions with search, page controls, results, and evidence panel.
-3. `docs/screenshots/03-customer-profile.png` — customer risk summary and scored transaction history.
-4. `docs/screenshots/04-investigations.png` — alert queue and pending-case workflow.
-5. `docs/screenshots/05-model-evaluation.png` — split description, threshold metrics, and precision–recall curve.
+1. [Overview](docs/screenshots/01-overview.png)
+2. [Transaction investigation](docs/screenshots/02-transactions.png)
+3. [Customer profile](docs/screenshots/03-customer-profile.png)
+4. [Investigations and cases](docs/screenshots/04-investigations.png)
+5. [Model evaluation](docs/screenshots/05-model-evaluation.png)
+
+The screenshots document the dashboard views; the live app was not opened in a browser during this review. Use a disposable database when demonstrating case actions.
 
 Use sample records only. Do not include local database credentials, terminal history, or private account information in screenshots.
 

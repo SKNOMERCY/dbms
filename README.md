@@ -191,15 +191,27 @@ The local dashboard URL printed by Streamlit is normally `http://localhost:8501`
 
 ## Dashboard screenshots
 
-The checked-in Streamlit AppTest covers the recoverable database-connection failure path. The main dashboard views have not been visually inspected in a browser in this environment, and no dashboard screenshots are included yet. Capture the real app locally and use the filenames below; avoid credentials or terminal details.
+The five screenshots below show the real Streamlit dashboard with sample data. They are also stored under `docs/screenshots/`. The live app was not opened in a browser during this review; the checked-in Streamlit AppTest covers the recoverable database-connection failure path. Use a disposable database for any case action, and keep credentials and terminal details out of future captures.
 
-After setup, start `streamlit run dashboard.py` and capture these views at `http://localhost:8501` using actual sample records. Save the PNGs under `docs/screenshots/` with these exact names:
+### Overview
 
-- `docs/screenshots/01-overview.png` — shared filters, KPI definitions, and overview charts.
-- `docs/screenshots/02-transactions.png` — search, pagination, results, and transaction evidence.
-- `docs/screenshots/03-customer-profile.png` — customer summary and scored transaction history.
-- `docs/screenshots/04-investigations.png` — alert queue and case workflow. Use a disposable database for any create/resolve/reopen action.
-- `docs/screenshots/05-model-evaluation.png` — split description, threshold metrics, and precision–recall curve.
+![FinGuard AI overview with shared filters, KPIs, and activity charts](docs/screenshots/01-overview.png)
+
+### Transaction investigation
+
+![Transaction search, pagination, results, and risk evidence](docs/screenshots/02-transactions.png)
+
+### Customer profile
+
+![Customer summary and highest-scored transaction history](docs/screenshots/03-customer-profile.png)
+
+### Investigations and cases
+
+![Alert queue and case management workflow](docs/screenshots/04-investigations.png)
+
+### Model evaluation
+
+![Selected model, held-out metrics, and operating threshold](docs/screenshots/05-model-evaluation.png)
 
 ## Tests
 
