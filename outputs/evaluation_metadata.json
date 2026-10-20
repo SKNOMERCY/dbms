@@ -1,0 +1,9 @@
+{
+  "split_description": "Stratified random transaction-level 60/20/20 train/validation/test split; model selection uses validation PR-AUC; final comparison uses the held-out test split.",
+  "random_state": 42,
+  "threshold": 0.5,
+  "high_risk_threshold": 0.8,
+  "test_rows": 2000,
+  "metrics": "Precision, recall, and F1 use the operating threshold; PR-AUC and ROC-AUC are score-ranking metrics.",
+  "dataset_scope": "Single simulated transaction sample; not independent or time-separated validation."
+}

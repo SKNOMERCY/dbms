@@ -75,16 +75,43 @@ $function$;
 -- RUN: Test customer risk function
 SELECT * FROM get_customer_risk((SELECT MIN(customer_id) FROM customer));
 
--- 5. Close investigations by outcome and synchronize their linked alert.
+-- 5. Keep investigation creation, resolution, and reopening synchronized with alerts.
 -- RUN: Ensure investigation resolved timestamp exists (already in fresh schema)
 ALTER TABLE investigation ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;
+-- Migrate the legacy timestamp column when installing onto an older project schema.
+DO $migration$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'investigation'
+          AND column_name = 'closed_at'
+    ) THEN
+        EXECUTE 'UPDATE investigation SET resolved_at = closed_at '
+                'WHERE resolved_at IS NULL AND closed_at IS NOT NULL';
+    END IF;
+END;
+$migration$;
 -- RUN: Create investigation outcome trigger function
 CREATE OR REPLACE FUNCTION sync_investigation_resolution()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $function$
 BEGIN
-    IF NEW.outcome IN ('FRAUD', 'NOT_FRAUD')
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.outcome IN ('FRAUD', 'NOT_FRAUD') THEN
+            NEW.resolved_at := COALESCE(NEW.resolved_at, CURRENT_TIMESTAMP);
+        ELSE
+            NEW.resolved_at := NULL;
+        END IF;
+        UPDATE fraud_alert
+        SET status = CASE NEW.outcome
+                         WHEN 'FRAUD' THEN 'CONFIRMED_FRAUD'
+                         WHEN 'NOT_FRAUD' THEN 'FALSE_POSITIVE'
+                         ELSE 'UNDER_REVIEW'
+                     END
+        WHERE alert_id = NEW.alert_id;
+    ELSIF NEW.outcome IN ('FRAUD', 'NOT_FRAUD')
        AND NEW.outcome IS DISTINCT FROM OLD.outcome THEN
         NEW.resolved_at := COALESCE(NEW.resolved_at, CURRENT_TIMESTAMP);
         UPDATE fraud_alert
@@ -105,9 +132,24 @@ $function$;
 -- RUN: Create investigation outcome trigger
 DROP TRIGGER IF EXISTS trg_sync_investigation_resolution ON investigation;
 CREATE TRIGGER trg_sync_investigation_resolution
-BEFORE UPDATE OF outcome ON investigation
+BEFORE INSERT OR UPDATE OF outcome ON investigation
 FOR EACH ROW
 EXECUTE FUNCTION sync_investigation_resolution();
+
+-- Reconcile cases created before this trigger was installed (for example by ml_pipeline.py).
+UPDATE fraud_alert fa
+SET status = CASE i.outcome
+                 WHEN 'FRAUD' THEN 'CONFIRMED_FRAUD'
+                 WHEN 'NOT_FRAUD' THEN 'FALSE_POSITIVE'
+                 ELSE 'UNDER_REVIEW'
+             END
+FROM investigation i
+WHERE i.alert_id = fa.alert_id
+  AND fa.status IS DISTINCT FROM CASE i.outcome
+                                    WHEN 'FRAUD' THEN 'CONFIRMED_FRAUD'
+                                    WHEN 'NOT_FRAUD' THEN 'FALSE_POSITIVE'
+                                    ELSE 'UNDER_REVIEW'
+                                END;
 
 -- 6a. CTE: show the ten highest model scores.
 -- RUN: Demo CTE query

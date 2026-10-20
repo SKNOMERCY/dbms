@@ -22,7 +22,7 @@ Open `outputs/model_results.csv`. Explain that model choice uses validation PR-A
 
 ### 3:30–4:30 — Dashboard
 
-Open the dashboard and show date/category filters, transaction search, customer lookup, model performance, and the investigation queue. Demonstrate the CSV export and point out formula neutralization. If showing a case update, use a demo/test database and confirm that the UI asks before saving.
+Open the dashboard and show its shared date/category/amount/risk/alert/case filters, KPI definitions, and interactive overview. In **Transactions**, search and page through records, inspect actual score, model, alert, and case fields, and demonstrate CSV export. In **Investigations**, show an alert without a case, then create, resolve, or reopen one on a demo/test database. In **Model evaluation**, move the operating threshold and explain that it changes test-set metrics only; it does not rewrite stored alerts.
 
 ### 4:30–5:00 — Close
 
@@ -46,12 +46,13 @@ This project helped me practice connecting database integrity, model evaluation,
 
 ## Dashboard screenshot checklist
 
-Capture real screenshots after starting the app locally and loading the sample database. Add them under `docs/screenshots/` and link them from `README.md`:
+The dashboard script passed Streamlit AppTest, including a rerun with the High risk filter, against the configured PostgreSQL database. It was not visually inspected in a browser in this environment, so no screenshot is included. After launching the app locally and loading the sample database, capture real screenshots under `docs/screenshots/` and link them from `README.md`:
 
-1. Overview with the date range and summary cards visible.
-2. Transactions with search/filter controls and a few result rows.
-3. Customer lookup with the risk summary and transaction history.
-4. Investigations showing the pending queue and review controls.
+1. Overview with the shared filter context, KPI rows, and chart titles visible.
+2. Transactions with search, page controls, a result table, and the evidence panel.
+3. Customer profile with a risk summary and scored transaction history.
+4. Investigations showing the alert queue and the pending-case workflow.
+5. Model evaluation showing the split description, threshold metrics, and precision–recall curve.
 
 Use sample records only. Do not include local database credentials, terminal history, or private account information in screenshots.
 

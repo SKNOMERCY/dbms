@@ -14,8 +14,7 @@ The pipeline selects among the models using validation PR-AUC, then compares the
 
 ## 4. What does the investigation trigger do?
 
-When an investigation's `outcome` changes to `FRAUD` or `NOT_FRAUD`, the advanced trigger sets `resolved_at`. It also changes the linked alert status to `CONFIRMED_FRAUD` or `FALSE_POSITIVE`, respectively.
-Changing the outcome back to `PENDING` clears `resolved_at` and moves the linked alert back to `UNDER_REVIEW`.
+When an investigation is inserted as `PENDING`, the advanced trigger moves its linked alert to `UNDER_REVIEW`. Changing the outcome to `FRAUD` or `NOT_FRAUD` stamps `resolved_at` and changes the alert to `CONFIRMED_FRAUD` or `FALSE_POSITIVE`. Reopening a case clears the timestamp and moves the alert back to `UNDER_REVIEW`. Installing the advanced SQL also reconciles alerts linked to cases created before the trigger existed.
 
 ## 5. Why does the investigation table use `outcome`, not `status`?
 

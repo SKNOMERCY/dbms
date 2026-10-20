@@ -12,6 +12,7 @@ Run:      python ml_pipeline.py [--reports-only]
 """
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -214,6 +215,21 @@ def save_outputs(results, models, evaluation, engine=None):
 
     y_test = evaluation["y_test"]
     scores_by_model = evaluation["scores"]
+    predictions = pd.DataFrame({"y_true": np.asarray(y_test, dtype=int)})
+    for name, scores in scores_by_model.items():
+        predictions[name] = np.asarray(scores, dtype=float)
+    predictions.to_csv(os.path.join(output_dir, "evaluation_predictions.csv"), index=False)
+    metadata = {
+        "split_description": "Stratified random transaction-level 60/20/20 train/validation/test split; model selection uses validation PR-AUC; final comparison uses the held-out test split.",
+        "random_state": RANDOM_STATE,
+        "threshold": ALERT_THRESHOLD,
+        "high_risk_threshold": HIGH_THRESHOLD,
+        "test_rows": int(len(y_test)),
+        "metrics": "Precision, recall, and F1 use the operating threshold; PR-AUC and ROC-AUC are score-ranking metrics.",
+        "dataset_scope": "Single simulated transaction sample; not independent or time-separated validation.",
+    }
+    with open(os.path.join(output_dir, "evaluation_metadata.json"), "w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
     for name, scores in scores_by_model.items():
         predictions = (scores >= ALERT_THRESHOLD).astype(int)
         matrix = confusion_matrix(y_test, predictions, labels=[0, 1])

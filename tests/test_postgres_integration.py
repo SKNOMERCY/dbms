@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -6,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
+from dashboard_logic import build_filter_sql
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
@@ -25,6 +27,8 @@ def isolated_schema_connection():
                 connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
                 connection.execute(text(f'SET LOCAL search_path TO "{schema_name}"'))
                 connection.exec_driver_sql((PROJECT_DIR / "schema.sql").read_text(encoding="utf-8"))
+                # Exercise the compatibility path for databases created with the former timestamp name.
+                connection.exec_driver_sql("ALTER TABLE investigation ADD COLUMN closed_at TIMESTAMP")
 
                 advanced_sql = (PROJECT_DIR / "advanced_db.sql").read_text(encoding="utf-8")
                 start = advanced_sql.index("-- 2. Show HIGH-risk transactions")
@@ -133,6 +137,18 @@ def test_schema_rejects_invalid_transaction_amount(savepoint):
 def test_customer_risk_function_and_resolution_trigger_stay_consistent(savepoint):
     customer_id, _, alert_id, case_id = seed_investigation(savepoint)
 
+    initial_status = savepoint.execute(
+        text("SELECT status FROM fraud_alert WHERE alert_id = :alert_id"),
+        {"alert_id": alert_id},
+    ).scalar_one()
+    assert initial_status == "UNDER_REVIEW"
+
+    duplicate_case = savepoint.execute(
+        text("INSERT INTO investigation (alert_id) VALUES (:alert_id) ON CONFLICT (alert_id) DO NOTHING RETURNING case_id"),
+        {"alert_id": alert_id},
+    ).scalar_one_or_none()
+    assert duplicate_case is None
+
     summary = savepoint.execute(
         text("SELECT * FROM get_customer_risk(:customer_id)"),
         {"customer_id": customer_id},
@@ -163,3 +179,46 @@ def test_customer_risk_function_and_resolution_trigger_stay_consistent(savepoint
     ).one()
     assert reopened_at is None
     assert reopened_status == "UNDER_REVIEW"
+
+
+def test_shared_filters_apply_inclusive_date_range_and_bound_statuses(savepoint):
+    _, transaction_id, _, _ = seed_investigation(savepoint)
+    transaction_time = savepoint.execute(
+        text("SELECT txn_timestamp FROM transaction WHERE transaction_id = :transaction_id"),
+        {"transaction_id": transaction_id},
+    ).scalar_one()
+    savepoint.execute(
+        text("""
+            INSERT INTO transaction (trans_num, account_id, merchant_id, device_id, location_id,
+                                     amount, txn_timestamp, is_fraud)
+            SELECT :trans_num, account_id, merchant_id, device_id, location_id,
+                   amount, :next_day, is_fraud
+            FROM transaction WHERE transaction_id = :transaction_id
+        """),
+        {
+            "trans_num": uuid4().hex,
+            "next_day": transaction_time.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1),
+            "transaction_id": transaction_id,
+        },
+    )
+
+    where, params = build_filter_sql(
+        start_day=transaction_time.date(),
+        end_day=transaction_time.date(),
+        category="All categories",
+        amount_range=(0, 100),
+        score_range=(0, 100),
+        risk_level="High",
+        alert_status="Under review",
+        case_outcome="Pending",
+    )
+    count = savepoint.execute(
+        text(f"""SELECT COUNT(*) FROM transaction t
+                  JOIN merchant m ON m.merchant_id = t.merchant_id
+                  LEFT JOIN risk_score rs ON rs.transaction_id = t.transaction_id
+                  LEFT JOIN fraud_alert fa ON fa.transaction_id = t.transaction_id
+                  LEFT JOIN investigation i ON i.alert_id = fa.alert_id
+                  WHERE {where}"""),
+        params,
+    ).scalar_one()
+    assert count == 1

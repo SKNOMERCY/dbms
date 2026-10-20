@@ -9,7 +9,7 @@ The included sample has **10,000 transactions**, including **700 dataset-labeled
 - **Relational design:** 12 PostgreSQL tables with primary keys, foreign keys, domain constraints, indexes, views, a function, and an investigation trigger.
 - **Fraud scoring:** Logistic Regression, Random Forest, and Isolation Forest compared with validation PR-AUC; the refreshed Random Forest report records 0.948 validation PR-AUC and 0.962 held-out test PR-AUC on this sample.
 - **Investigation workflow:** risk scores create model alerts and high-risk cases; resolving a case updates its linked alert in the database.
-- **Analyst dashboard:** sample-date presets and custom date ranges, category and alert filters, transaction search, customer profiles, a pending-case workflow, model reports, and CSV export.
+- **Analyst dashboard:** shared date, category, amount, score, risk-band, alert, and case-outcome filters; a dark navy operations workspace; paginated transaction search and evidence details; customer profiles; case creation, resolution, and reopening; model evaluation; and safe CSV export.
 - **Reproducible sample data:** the loader uses a fixed random seed for generated account, device, and loan fields.
 
 ## Data flow
@@ -57,11 +57,11 @@ The schema separates customers, accounts, cards, merchants, devices, locations, 
 
 - PostgreSQL for relational storage, constraints, indexes, views, a function, and a trigger.
 - Python with pandas, NumPy, scikit-learn, SQLAlchemy, and psycopg2 for loading and ML.
-- Matplotlib for saved model and fraud-analysis charts.
+- Matplotlib for saved model reports and Altair for interactive dashboard charts.
 - Streamlit for the interactive dashboard.
 - SQL and Mermaid for the database demonstrations and ER diagram.
 
-The Streamlit dashboard separates dataset labels from model-generated alerts so the charts and queue are easier to interpret. It includes a risk-score distribution, searchable transaction results, read-only resolved-case history, per-customer summaries, and model evaluation reports. Case updates require confirmation and refresh the queue automatically.
+The Streamlit dashboard separates dataset labels, model-generated alerts, and investigator-confirmed cases. Its global filters apply to the overview, transaction results, and case queue. Transaction search is paginated and bounded; its detail panel shows recorded score, model, alert, and case fields without inventing a per-transaction explanation. Case actions require confirmation, use conditional updates, clear cached reads, and synchronize the linked alert through the database trigger.
 
 ## Folder structure
 
@@ -69,28 +69,34 @@ The Streamlit dashboard separates dataset labels from model-generated alerts so 
 dbms/
 ├── .gitattributes
 ├── .gitignore
+├── .env.example
 ├── advanced_db.sql
+├── app_utils.py
 ├── dashboard.py
+├── dashboard_logic.py
 ├── ER_DIAGRAM.md
 ├── FACULTY_QA.md
-├── LICENSE
 ├── load_data.py
+├── LICENSE
 ├── ml_pipeline.py
 ├── outputs/
-│   ├── confusion_matrix_IsolationForest.png
-│   ├── confusion_matrix_LogisticRegression.png
-│   ├── confusion_matrix_RandomForest.png
-│   ├── feature_importance.png
-│   ├── fraud_by_category.png
-│   ├── fraud_by_hour.png
+│   ├── evaluation_metadata.json
+│   ├── evaluation_predictions.csv
 │   ├── model_results.csv
-│   ├── precision_recall_curve.png
-│   ├── roc_curve.png
-│   └── top_features.csv
+│   └── charts and feature reports
+├── PORTFOLIO_GUIDE.md
 ├── queries.sql
+├── requirements-dev.txt
 ├── requirements.txt
 ├── schema.sql
-└── sparkov_sample_10000.csv
+├── sparkov_sample_10000.csv
+└── tests/
+    ├── test_app_utils.py
+    ├── test_dashboard_app.py
+    ├── test_dashboard_logic.py
+    ├── test_loader_safety.py
+    ├── test_ml_pipeline.py
+    └── test_postgres_integration.py
 ```
 
 `load_data.py` reads `sparkov_sample_10000.csv` from the project directory, even when the script is launched from another working directory. `.env.example` documents local settings; `.env` is ignored by Git.
@@ -161,7 +167,7 @@ Using `psql` from the project folder:
 psql -U postgres -d finguard -f advanced_db.sql
 ```
 
-Alternatively, open `advanced_db.sql` in pgAdmin's Query Tool and execute its statements in order. The script creates indexes (some names already exist in the base schema), `v_high_risk_transactions`, `v_customer_risk_summary_advanced`, `get_customer_risk()`, a resolution timestamp column, and an investigation trigger. Its trigger-test update is rolled back at the end. The transaction examples use a temporary table.
+Alternatively, open `advanced_db.sql` in pgAdmin's Query Tool and execute its statements in order. The script creates indexes (some names already exist in the base schema), `v_high_risk_transactions`, `v_customer_risk_summary_advanced`, `get_customer_risk()`, a resolution timestamp column, and an investigation trigger. The trigger marks alerts `UNDER_REVIEW` when a case is created, synchronizes outcomes on resolution/reopening, and reconciles alerts linked to existing cases. Its trigger-test update is rolled back at the end. The transaction examples use a temporary table.
 
 ### 7. Start the dashboard
 
@@ -179,9 +185,15 @@ The local dashboard URL printed by Streamlit is normally `http://localhost:8501`
 4. Review the refreshed `outputs/model_results.csv`. Explain that validation PR-AUC selects the model while the separate test set supplies the final comparison. To refresh the artifacts after changing the data or model code, run `ml_pipeline.py --reports-only`; run without that flag only when you intend to replace database scores, alerts, and investigations.
 5. Open the confusion-matrix, ROC, precision-recall, feature-importance, and fraud-analysis files in `outputs/`.
 6. Run `advanced_db.sql` and show its views, function, indexes, demo queries, and rollback-safe trigger example.
-7. Start the dashboard. Use the sidebar date and category filters to explore the overview, then open **Transactions** to search by transaction, customer, or merchant, adjust the minimum model score, and export the filtered rows as CSV.
+7. Start the dashboard. Use the shared date, category, amount, score, risk, alert, and case filters to explore the overview. Open **Transactions** to search by transaction, customer, merchant, or category, page through results, inspect linked evidence, and export the current page as CSV.
 8. Open **Customer lookup** and look up a customer ID (for example `1`) to review the aggregate risk summary and highest-scored transactions. **Model performance** shows the saved model comparison and evaluation charts under `outputs/`; regenerate them after changes to the data or pipeline.
-9. In **Investigations**, select a case and choose `FRAUD` or `NOT_FRAUD`. Confirm the database update before saving; the trigger synchronizes the associated alert status and resolution timestamp. This action updates database records, so only use it when you intend to change that case.
+9. In **Investigations**, create a case from an unassigned alert, resolve a pending case as `FRAUD` or `NOT_FRAUD`, or reopen a resolved case. Confirm the database update before saving; the trigger synchronizes alert status and resolution time. These actions write to the database, so demonstrate them using a disposable/demo database.
+
+## Dashboard screenshots
+
+The app script has been smoke-tested through Streamlit AppTest against the configured PostgreSQL database, including a rerun with the High risk filter. It has not been visually inspected in a browser in this environment, and no dashboard screenshot is included yet. Use the screenshot checklist in [PORTFOLIO_GUIDE.md](PORTFOLIO_GUIDE.md) after launching the app locally; capture real sample data and avoid credentials or terminal details.
+
+For a screenshot walkthrough, run the setup steps above, start `streamlit run dashboard.py`, then capture **Overview**, **Transactions**, **Investigations**, **Customer profile**, and **Model evaluation** at `http://localhost:8501`. Use the sample's actual database records; use a disposable database for any create/resolve/reopen case action.
 
 ## Tests
 
@@ -192,7 +204,14 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The unit tests cover CSV formula-injection protection, feature preparation and train/validation/test boundaries, and the loader's reset safeguards. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` points to a disposable test database. They create an isolated schema and roll back the schema and test rows. Set that variable in the current shell to include the integration checks; do not point it at a database containing data you need.
+The unit tests cover CSV formula-injection protection, feature preparation and split boundaries, shared filter construction, risk-band thresholds, operating-point metrics, safe database-error messaging, and loader reset safeguards. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` points to a disposable test database. They create an isolated schema and roll back the schema and test rows. Set that variable in the current shell to include those checks; do not point it at a database containing data you need.
+
+## Troubleshooting
+
+- **Connection failed:** make sure PostgreSQL is running and `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` in `.env` match your local server. The dashboard displays a generic recovery message and keeps connection details out of the UI.
+- **Missing customer-risk function or high-risk view:** run `advanced_db.sql` after the base schema and pipeline setup. A loader reset drops advanced objects, so run the advanced SQL setup again after a reset.
+- **No model report or threshold curves:** run `python ml_pipeline.py --reports-only`. This reads the database and refreshes evaluation files without replacing risk scores, alerts, or investigations.
+- **No transactions match:** reset the global filters in the sidebar or use the all-dates/all-categories defaults.
 
 ## Notes and limitations
 
@@ -200,5 +219,6 @@ The unit tests cover CSV formula-injection protection, feature preparation and t
 - The base schema defines `investigation.outcome` (`PENDING`, `FRAUD`, `NOT_FRAUD`), not an investigation `status` column. `advanced_db.sql` adds `resolved_at` and synchronizes the linked alert status for resolved outcomes.
 - The pipeline uses out-of-fold model predictions for the supervised model's database scores. Customer-level aggregates calculated across the full dataset have been removed to avoid sharing information across folds. Model choice uses a validation split, separate from the final test split. Evaluation uses random transaction-level splits, so it measures held-out transactions from the sampled customer population; it does not establish performance for unseen customers or a separate dataset.
 - No deployment, production monitoring, or independent evaluation on a second dataset is documented in this project.
+- The evaluation dashboard's operating-point slider is an analytical view of saved held-out predictions; changing it does not rewrite database alerts. The database alert threshold remains 0.50 and investigation threshold remains 0.80 in normalized score units.
 - Generated account, device, income, and loan attributes are synthetic; they support the DBMS demonstration and are not observations from the source CSV.
 - PostgreSQL integration checks require an explicitly configured test connection; the standard unit suite does not modify a database.
