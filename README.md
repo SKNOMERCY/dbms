@@ -191,9 +191,15 @@ The local dashboard URL printed by Streamlit is normally `http://localhost:8501`
 
 ## Dashboard screenshots
 
-The app script has been smoke-tested through Streamlit AppTest against the configured PostgreSQL database, including a rerun with the High risk filter. It has not been visually inspected in a browser in this environment, and no dashboard screenshot is included yet. Use the screenshot checklist in [PORTFOLIO_GUIDE.md](PORTFOLIO_GUIDE.md) after launching the app locally; capture real sample data and avoid credentials or terminal details.
+The checked-in Streamlit AppTest covers the recoverable database-connection failure path. The main dashboard views have not been visually inspected in a browser in this environment, and no dashboard screenshots are included yet. Capture the real app locally and use the filenames below; avoid credentials or terminal details.
 
-For a screenshot walkthrough, run the setup steps above, start `streamlit run dashboard.py`, then capture **Overview**, **Transactions**, **Investigations**, **Customer profile**, and **Model evaluation** at `http://localhost:8501`. Use the sample's actual database records; use a disposable database for any create/resolve/reopen case action.
+After setup, start `streamlit run dashboard.py` and capture these views at `http://localhost:8501` using actual sample records. Save the PNGs under `docs/screenshots/` with these exact names:
+
+- `docs/screenshots/01-overview.png` — shared filters, KPI definitions, and overview charts.
+- `docs/screenshots/02-transactions.png` — search, pagination, results, and transaction evidence.
+- `docs/screenshots/03-customer-profile.png` — customer summary and scored transaction history.
+- `docs/screenshots/04-investigations.png` — alert queue and case workflow. Use a disposable database for any create/resolve/reopen action.
+- `docs/screenshots/05-model-evaluation.png` — split description, threshold metrics, and precision–recall curve.
 
 ## Tests
 

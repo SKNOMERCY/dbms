@@ -46,13 +46,13 @@ This project helped me practice connecting database integrity, model evaluation,
 
 ## Dashboard screenshot checklist
 
-The dashboard script passed Streamlit AppTest, including a rerun with the High risk filter, against the configured PostgreSQL database. It was not visually inspected in a browser in this environment, so no screenshot is included. After launching the app locally and loading the sample database, capture real screenshots under `docs/screenshots/` and link them from `README.md`:
+The checked-in Streamlit AppTest covers the recoverable database-connection failure path. The main views were not visually inspected in a browser in this environment, so no dashboard screenshot is included. After launching the app locally and loading the sample database, capture real screenshots under `docs/screenshots/` and link them from `README.md`:
 
-1. Overview with the shared filter context, KPI rows, and chart titles visible.
-2. Transactions with search, page controls, a result table, and the evidence panel.
-3. Customer profile with a risk summary and scored transaction history.
-4. Investigations showing the alert queue and the pending-case workflow.
-5. Model evaluation showing the split description, threshold metrics, and precision–recall curve.
+1. `docs/screenshots/01-overview.png` — overview with shared filter context, KPI rows, and chart titles visible.
+2. `docs/screenshots/02-transactions.png` — transactions with search, page controls, results, and evidence panel.
+3. `docs/screenshots/03-customer-profile.png` — customer risk summary and scored transaction history.
+4. `docs/screenshots/04-investigations.png` — alert queue and pending-case workflow.
+5. `docs/screenshots/05-model-evaluation.png` — split description, threshold metrics, and precision–recall curve.
 
 Use sample records only. Do not include local database credentials, terminal history, or private account information in screenshots.
 
