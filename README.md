@@ -236,6 +236,7 @@ The unit tests cover CSV formula-injection protection, feature preparation and s
 
 - **Connection failed:** make sure PostgreSQL is running and `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, and `PGPASSWORD` in `.env` match your local server. The dashboard displays a generic recovery message and keeps connection details out of the UI.
 - **Missing customer-risk function or high-risk view:** run `advanced_db.sql` after the base schema and pipeline setup. A loader reset drops advanced objects, so run the advanced SQL setup again after a reset.
+- **Missing case-history table / database query error:** apply `advanced_db.sql` to the same database configured in `.env`; do not reset or reload the dataset. The dashboard now identifies this specific missing-table error and shows the migration step.
 - **No model report or threshold curves:** run `python ml_pipeline.py --reports-only`. This reads the database and refreshes evaluation files without replacing risk scores, alerts, or investigations.
 - **No transactions match:** reset the global filters in the sidebar or use the all-dates/all-categories defaults.
 

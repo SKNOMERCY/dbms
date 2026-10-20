@@ -17,7 +17,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 from sklearn.metrics import precision_recall_curve, roc_curve
 
-from app_utils import safe_csv_bytes
+from app_utils import database_error_message, safe_csv_bytes
 from dashboard_logic import ALERT_STATUSES, CASE_OUTCOMES, build_filter_sql, risk_band, threshold_metrics
 
 
@@ -73,11 +73,8 @@ def _read_query(query: str, params_items: tuple):
 def read_query(query: str, params: dict | None = None) -> pd.DataFrame:
     try:
         return _read_query(query, tuple(sorted((params or {}).items())))
-    except SQLAlchemyError:
-        st.error(
-            "A database request failed. Check that PostgreSQL is running, the FinGuard schema is installed, "
-            "and your local connection settings are correct. See the README troubleshooting steps."
-        )
+    except (SQLAlchemyError, pd.errors.DatabaseError) as exc:
+        st.error(database_error_message(exc))
         st.stop()
 
 
