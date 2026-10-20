@@ -1,0 +1,4 @@
+model,selected,validation_pr_auc,precision,recall,f1,roc_auc,pr_auc
+LogisticRegression,False,0.724,0.381,0.95,0.544,0.972,0.727
+RandomForest,True,0.948,0.915,0.929,0.922,0.992,0.962
+IsolationForest,False,0.638,0.575,0.6,0.587,0.933,0.621
