@@ -50,7 +50,7 @@ def savepoint(isolated_schema_connection):
         transaction.rollback()
 
 
-def seed_investigation(connection):
+def seed_investigation(connection, create_case=True):
     home_location = connection.execute(
         text("INSERT INTO location (loc_type, latitude, longitude) VALUES ('HOME', 40, -73) RETURNING location_id")
     ).scalar_one()
@@ -99,10 +99,12 @@ def seed_investigation(connection):
         text("INSERT INTO fraud_alert (transaction_id, risk_score) VALUES (:transaction_id, 90) RETURNING alert_id"),
         {"transaction_id": transaction_id},
     ).scalar_one()
-    case_id = connection.execute(
-        text("INSERT INTO investigation (alert_id) VALUES (:alert_id) RETURNING case_id"),
-        {"alert_id": alert_id},
-    ).scalar_one()
+    case_id = None
+    if create_case:
+        case_id = connection.execute(
+            text("INSERT INTO investigation (alert_id) VALUES (:alert_id) RETURNING case_id"),
+            {"alert_id": alert_id},
+        ).scalar_one()
     return customer_id, transaction_id, alert_id, case_id
 
 
@@ -179,6 +181,67 @@ def test_customer_risk_function_and_resolution_trigger_stay_consistent(savepoint
     ).one()
     assert reopened_at is None
     assert reopened_status == "UNDER_REVIEW"
+
+
+def test_investigation_history_records_create_resolve_and_reopen(savepoint):
+    _, _, alert_id, _ = seed_investigation(savepoint, create_case=False)
+
+    savepoint.execute(
+        text("""SELECT set_config('finguard.actor', :actor, true),
+                     set_config('finguard.reason', :reason, true)"""),
+        {"actor": "Demo Analyst", "reason": "Alert requires investigation"},
+    )
+    case_id = savepoint.execute(
+        text("INSERT INTO investigation (alert_id) VALUES (:alert_id) RETURNING case_id"),
+        {"alert_id": alert_id},
+    ).scalar_one()
+    savepoint.execute(
+        text("""SELECT set_config('finguard.actor', :actor, true),
+                     set_config('finguard.reason', :reason, true)"""),
+        {"actor": "Demo Analyst", "reason": "Reviewed transaction evidence"},
+    )
+    savepoint.execute(
+        text("UPDATE investigation SET outcome = 'FRAUD' WHERE case_id = :case_id"),
+        {"case_id": case_id},
+    )
+    savepoint.execute(
+        text("""SELECT set_config('finguard.actor', :actor, true),
+                     set_config('finguard.reason', :reason, true)"""),
+        {"actor": "Demo Analyst", "reason": "Additional information received"},
+    )
+    savepoint.execute(
+        text("UPDATE investigation SET outcome = 'PENDING' WHERE case_id = :case_id"),
+        {"case_id": case_id},
+    )
+    savepoint.execute(
+        text("UPDATE investigation SET outcome = 'PENDING' WHERE case_id = :case_id"),
+        {"case_id": case_id},
+    )
+
+    events = savepoint.execute(
+        text("""SELECT event_type, old_outcome, new_outcome, changed_by, reason
+               FROM investigation_history
+               WHERE case_reference = :case_id
+               ORDER BY history_id"""),
+        {"case_id": case_id},
+    ).mappings().all()
+    alert_status = savepoint.execute(
+        text("SELECT status FROM fraud_alert WHERE alert_id = :alert_id"),
+        {"alert_id": alert_id},
+    ).scalar_one()
+
+    assert [(event["event_type"], event["old_outcome"], event["new_outcome"]) for event in events] == [
+        ("CASE_CREATED", None, "PENDING"),
+        ("CASE_RESOLVED", "PENDING", "FRAUD"),
+        ("CASE_REOPENED", "FRAUD", "PENDING"),
+    ]
+    assert events[0]["changed_by"]
+    assert events[0]["changed_by"] == "Demo Analyst"
+    assert events[0]["reason"] == "Alert requires investigation"
+    assert events[1]["changed_by"] == "Demo Analyst"
+    assert events[1]["reason"] == "Reviewed transaction evidence"
+    assert events[2]["reason"] == "Additional information received"
+    assert alert_status == "UNDER_REVIEW"
 
 
 def test_shared_filters_apply_inclusive_date_range_and_bound_statuses(savepoint):

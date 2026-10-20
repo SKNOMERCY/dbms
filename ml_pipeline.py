@@ -24,7 +24,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
+from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold, cross_val_predict, train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LogisticRegression
@@ -123,7 +123,7 @@ def minmax(x, lo, hi):
     return np.clip((x - lo) / (hi - lo + 1e-12), 0, 1)
 
 
-def train_and_compare(X, y):
+def train_and_compare(X, y, groups=None):
     # Keep a final test set untouched during model selection.
     X_dev, X_te, y_dev, y_te = train_test_split(
         X, y, test_size=0.2, stratify=y, random_state=RANDOM_STATE)
@@ -200,7 +200,162 @@ def train_and_compare(X, y):
     print("\n=== Final model comparison (untouched 20% test set) ===")
     print(res, "\n")
     evaluation = {"y_test": y_te, "scores": test_scores}
+    if groups is not None:
+        customer_results, customer_evaluation, customer_metadata = evaluate_customer_holdout(
+            X, y, groups
+        )
+        evaluation["customer_holdout"] = (
+            customer_results,
+            customer_evaluation,
+            customer_metadata,
+        )
     return best, scorers[best], models[best], res, models, evaluation
+
+
+def customer_holdout_split_indices(y, groups):
+    """Return train/validation/test row indexes with customer groups kept apart."""
+    labels = np.asarray(y, dtype=int)
+    group_ids = np.asarray(groups)
+    if labels.ndim != 1 or group_ids.ndim != 1 or len(labels) != len(group_ids):
+        raise ValueError("Labels and groups must be one-dimensional arrays with equal length")
+    if len(np.unique(group_ids)) < 5:
+        raise ValueError("Customer-held-out evaluation requires at least five distinct groups")
+
+    def choose_fold(X, fold_labels, fold_groups, n_splits, target_fraction, seed):
+        splitter = StratifiedGroupKFold(
+            n_splits=n_splits, shuffle=True, random_state=seed
+        )
+        prevalence = float(np.mean(fold_labels))
+        candidates = []
+        for train_idx, held_idx in splitter.split(X, fold_labels, fold_groups):
+            if len(np.unique(fold_labels[train_idx])) != 2 or len(np.unique(fold_labels[held_idx])) != 2:
+                continue
+            held_fraction = len(held_idx) / len(fold_labels)
+            held_prevalence = float(np.mean(fold_labels[held_idx]))
+            score = abs(held_fraction - target_fraction) + abs(held_prevalence - prevalence)
+            candidates.append((score, train_idx, held_idx))
+        if not candidates:
+            raise ValueError(
+                "Could not form stratified customer-disjoint splits containing both label classes"
+            )
+        _, train_idx, held_idx = min(candidates, key=lambda candidate: candidate[0])
+        return train_idx, held_idx
+
+    rows = np.arange(len(labels))
+    development_local, test_idx = choose_fold(
+        rows, labels, group_ids, n_splits=5, target_fraction=0.20, seed=RANDOM_STATE
+    )
+    development_idx = rows[development_local]
+    train_local, validation_local = choose_fold(
+        development_idx,
+        labels[development_idx],
+        group_ids[development_idx],
+        n_splits=4,
+        target_fraction=0.25,
+        seed=RANDOM_STATE + 1,
+    )
+    train_idx = development_idx[train_local]
+    validation_idx = development_idx[validation_local]
+    return train_idx, validation_idx, test_idx
+
+
+def evaluate_customer_holdout(X, y, groups):
+    """Compare candidates on a customer-disjoint train/validation/test split."""
+    X_rows = X.reset_index(drop=True)
+    labels = pd.Series(np.asarray(y, dtype=int))
+    group_ids = np.asarray(groups)
+    train_idx, validation_idx, test_idx = customer_holdout_split_indices(labels, group_ids)
+    X_train, y_train = X_rows.iloc[train_idx], labels.iloc[train_idx]
+    X_validation, y_validation = X_rows.iloc[validation_idx], labels.iloc[validation_idx]
+    X_development = X_rows.iloc[np.concatenate((train_idx, validation_idx))]
+    y_development = labels.iloc[np.concatenate((train_idx, validation_idx))]
+    X_test, y_test = X_rows.iloc[test_idx], labels.iloc[test_idx]
+
+    def new_models():
+        return {
+            "LogisticRegression": make_pipeline(
+                StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=1000)
+            ),
+            "RandomForest": RandomForestClassifier(
+                n_estimators=200, class_weight="balanced", n_jobs=-1, random_state=RANDOM_STATE
+            ),
+            "IsolationForest": IsolationForest(
+                n_estimators=200, contamination="auto", random_state=RANDOM_STATE
+            ),
+        }
+
+    def fit_and_score(name, model, X_fit, y_fit, X_score):
+        if name == "IsolationForest":
+            model.fit(X_fit)
+            raw_fit = -model.score_samples(X_fit)
+            return minmax(-model.score_samples(X_score), raw_fit.min(), raw_fit.max())
+        model.fit(X_fit, y_fit)
+        return model.predict_proba(X_score)[:, 1]
+
+    validation_results = []
+    for name, model in new_models().items():
+        scores = fit_and_score(name, model, X_train, y_train, X_validation)
+        validation_results.append(
+            {"model": name, "validation_pr_auc": average_precision_score(y_validation, scores)}
+        )
+    validation = pd.DataFrame(validation_results).set_index("model")
+    selected = validation["validation_pr_auc"].idxmax()
+
+    test_scores = {}
+    results = []
+    for name, model in new_models().items():
+        scores = fit_and_score(name, model, X_development, y_development, X_test)
+        predicted = (scores >= ALERT_THRESHOLD).astype(int)
+        test_scores[name] = scores
+        results.append({
+            "model": name,
+            "selected": name == selected,
+            "validation_pr_auc": validation.loc[name, "validation_pr_auc"],
+            "precision": precision_score(y_test, predicted, zero_division=0),
+            "recall": recall_score(y_test, predicted, zero_division=0),
+            "f1": f1_score(y_test, predicted, zero_division=0),
+            "roc_auc": roc_auc_score(y_test, scores),
+            "pr_auc": average_precision_score(y_test, scores),
+        })
+
+    report = pd.DataFrame(results).set_index("model").round(3)
+    heldout_groups = len(np.unique(group_ids[test_idx]))
+    metadata = {
+        "split_description": (
+            "Stratified customer-disjoint 60/20/20-style train/validation/test partition. "
+            "No customer appears in more than one partition; group sizes make exact row fractions approximate."
+        ),
+        "selected_model": selected,
+        "random_state": RANDOM_STATE,
+        "threshold": ALERT_THRESHOLD,
+        "train_rows": int(len(train_idx)),
+        "validation_rows": int(len(validation_idx)),
+        "test_rows": int(len(test_idx)),
+        "train_customers": int(len(np.unique(group_ids[train_idx]))),
+        "validation_customers": int(len(np.unique(group_ids[validation_idx]))),
+        "test_customers": int(heldout_groups),
+        "dataset_scope": "Single simulated transaction sample; this is not independent real-world validation.",
+    }
+    return report, {"y_test": y_test, "scores": test_scores}, metadata
+
+
+def save_customer_holdout_outputs(customer_results, customer_eval, customer_metadata, output_dir=None):
+    """Save the customer-disjoint report without requiring a database connection."""
+    destination = Path(output_dir) if output_dir else PROJECT_DIR / "outputs"
+    destination.mkdir(parents=True, exist_ok=True)
+    customer_results.rename_axis("model").reset_index().to_csv(
+        destination / "customer_holdout_results.csv", index=False
+    )
+    customer_predictions = pd.DataFrame(
+        {"y_true": np.asarray(customer_eval["y_test"], dtype=int)}
+    )
+    for name, scores in customer_eval["scores"].items():
+        customer_predictions[name] = np.asarray(scores, dtype=float)
+    customer_predictions.to_csv(
+        destination / "customer_holdout_predictions.csv", index=False
+    )
+    with open(destination / "customer_holdout_metadata.json", "w", encoding="utf-8") as metadata_file:
+        json.dump(customer_metadata, metadata_file, indent=2)
 
 
 # ------------------------------------------------------------- 3B. OUTPUTS
@@ -219,6 +374,9 @@ def save_outputs(results, models, evaluation, engine=None):
     for name, scores in scores_by_model.items():
         predictions[name] = np.asarray(scores, dtype=float)
     predictions.to_csv(os.path.join(output_dir, "evaluation_predictions.csv"), index=False)
+    customer_holdout = evaluation.get("customer_holdout")
+    if customer_holdout:
+        save_customer_holdout_outputs(*customer_holdout, output_dir=output_dir)
     metadata = {
         "split_description": "Stratified random transaction-level 60/20/20 train/validation/test split; model selection uses validation PR-AUC; final comparison uses the held-out test split.",
         "random_state": RANDOM_STATE,
@@ -392,7 +550,7 @@ if __name__ == "__main__":
         data = load_data(db_engine)
         features = build_features(data)
         best_name, best_scorer, best_model, results, models, evaluation = train_and_compare(
-            features, data["is_fraud"]
+            features, data["is_fraud"], groups=data["customer_id"]
         )
         save_outputs(results, models, evaluation, db_engine)
         if args.reports_only:

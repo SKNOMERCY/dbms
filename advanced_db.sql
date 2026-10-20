@@ -151,6 +151,75 @@ WHERE i.alert_id = fa.alert_id
                                     ELSE 'UNDER_REVIEW'
                                 END;
 
+-- Keep a durable event log for case creation, resolution, and reopening.
+-- case_reference and alert_id remain available if one investigation row is deleted; a full loader reset removes the log table.
+CREATE TABLE IF NOT EXISTS investigation_history (
+    history_id BIGSERIAL PRIMARY KEY,
+    case_id INTEGER REFERENCES investigation(case_id) ON DELETE SET NULL,
+    case_reference INTEGER NOT NULL,
+    alert_id INTEGER NOT NULL,
+    event_type VARCHAR(16) NOT NULL
+        CHECK (event_type IN ('CASE_CREATED', 'CASE_RESOLVED', 'CASE_REOPENED')),
+    old_outcome VARCHAR(20)
+        CHECK (old_outcome IS NULL OR old_outcome IN ('PENDING', 'FRAUD', 'NOT_FRAUD')),
+    new_outcome VARCHAR(20) NOT NULL
+        CHECK (new_outcome IN ('PENDING', 'FRAUD', 'NOT_FRAUD')),
+    changed_by VARCHAR(120) NOT NULL,
+    reason TEXT,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+CREATE INDEX IF NOT EXISTS idx_investigation_history_case_time
+    ON investigation_history(case_reference, changed_at DESC, history_id DESC);
+
+CREATE OR REPLACE FUNCTION log_investigation_history()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+    previous_outcome VARCHAR(20);
+    actor_name TEXT;
+    event_reason TEXT;
+BEGIN
+    IF TG_OP = 'UPDATE' AND NEW.outcome IS NOT DISTINCT FROM OLD.outcome THEN
+        RETURN NEW;
+    END IF;
+
+    IF TG_OP = 'UPDATE' THEN
+        previous_outcome := OLD.outcome;
+    END IF;
+    actor_name := COALESCE(
+        NULLIF(BTRIM(current_setting('finguard.actor', true)), ''),
+        session_user
+    );
+    event_reason := NULLIF(BTRIM(current_setting('finguard.reason', true)), '');
+
+    INSERT INTO investigation_history (
+        case_id, case_reference, alert_id, event_type,
+        old_outcome, new_outcome, changed_by, reason
+    ) VALUES (
+        NEW.case_id,
+        NEW.case_id,
+        NEW.alert_id,
+        CASE
+            WHEN TG_OP = 'INSERT' THEN 'CASE_CREATED'
+            WHEN NEW.outcome = 'PENDING' THEN 'CASE_REOPENED'
+            ELSE 'CASE_RESOLVED'
+        END,
+        previous_outcome,
+        NEW.outcome,
+        actor_name,
+        event_reason
+    );
+    RETURN NEW;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS trg_log_investigation_history ON investigation;
+CREATE TRIGGER trg_log_investigation_history
+AFTER INSERT OR UPDATE OF outcome ON investigation
+FOR EACH ROW
+EXECUTE FUNCTION log_investigation_history();
+
 -- 6a. CTE: show the ten highest model scores.
 -- RUN: Demo CTE query
 WITH top_risk AS (

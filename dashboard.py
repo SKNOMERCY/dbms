@@ -81,6 +81,17 @@ def read_query(query: str, params: dict | None = None) -> pd.DataFrame:
         st.stop()
 
 
+def set_case_audit_context(connection, actor_name: str, reason: str):
+    """Set transaction-local context consumed by the PostgreSQL history trigger."""
+    connection.execute(
+        text(
+            "SELECT set_config('finguard.actor', :actor_name, true), "
+            "set_config('finguard.reason', :reason, true)"
+        ),
+        {"actor_name": actor_name.strip(), "reason": reason.strip()},
+    )
+
+
 def safe_table(frame: pd.DataFrame, **kwargs):
     st.dataframe(frame, width="stretch", hide_index=True, **kwargs)
 
@@ -583,14 +594,19 @@ with investigation_tab:
             if current_outcome == "PENDING":
                 next_outcome = st.selectbox("Investigation outcome", ["FRAUD", "NOT_FRAUD"], format_func=lambda value: "Confirm fraud" if value == "FRAUD" else "Not fraud")
                 action_text = "Save investigation outcome"
+            action_actor = st.text_input("Analyst name", max_chars=120, key="case_action_actor")
+            action_reason = st.text_area("Reason for this action", max_chars=500, key="case_action_reason")
             confirm_action = st.checkbox("I reviewed this case and confirm this database change.")
             submitted = st.form_submit_button(action_text, type="primary")
-        if submitted and not confirm_action:
+        if submitted and (not action_actor.strip() or not action_reason.strip()):
+            st.warning("Enter an analyst name and a reason to record this case action.")
+        elif submitted and not confirm_action:
             st.warning("Confirm the case change before saving.")
         elif submitted:
             expected_outcome = current_outcome
             try:
                 with engine.begin() as connection:
+                    set_case_audit_context(connection, action_actor, action_reason)
                     updated = connection.execute(
                         text("UPDATE investigation SET outcome = :outcome WHERE case_id = :case_id AND outcome = :expected RETURNING case_id"),
                         {"outcome": next_outcome, "case_id": selected_case_id, "expected": expected_outcome},
@@ -607,6 +623,24 @@ with investigation_tab:
     notice = st.session_state.pop("case_action_notice", None)
     if notice:
         st.success(notice)
+
+    if not cases.empty:
+        case_history = read_query(
+            """SELECT event_type, old_outcome, new_outcome, changed_by, reason, changed_at
+               FROM investigation_history
+               WHERE case_reference = :case_id
+               ORDER BY history_id DESC
+               LIMIT 50""",
+            {"case_id": selected_case_id},
+        )
+        st.markdown("##### Selected case history")
+        if case_history.empty:
+            st.caption("No case-history events are recorded for this case yet.")
+        else:
+            safe_table(case_history, column_config={
+                "changed_at": st.column_config.DatetimeColumn("Changed at", format="YYYY-MM-DD HH:mm:ss"),
+                "reason": st.column_config.TextColumn("Reason", width="large"),
+            })
 
     st.divider()
     st.markdown("##### Alerts without an investigation")
@@ -644,13 +678,18 @@ with investigation_tab:
         alert_ids = eligible_alerts["alert_id"].astype(int).tolist()
         with st.form("create_case_form"):
             selected_alert_id = int(st.selectbox("Alert to investigate", alert_ids))
+            create_actor = st.text_input("Analyst name", max_chars=120, key="create_case_actor")
+            create_reason = st.text_area("Reason for opening this case", max_chars=500, key="create_case_reason")
             confirm_create = st.checkbox("Create a pending investigation for this alert.")
             create_submitted = st.form_submit_button("Create investigation", type="primary")
-        if create_submitted and not confirm_create:
+        if create_submitted and (not create_actor.strip() or not create_reason.strip()):
+            st.warning("Enter an analyst name and a reason to record this case action.")
+        elif create_submitted and not confirm_create:
             st.warning("Confirm case creation before saving.")
         elif create_submitted:
             try:
                 with engine.begin() as connection:
+                    set_case_audit_context(connection, create_actor, create_reason)
                     created = connection.execute(
                         text("INSERT INTO investigation (alert_id) VALUES (:alert_id) ON CONFLICT (alert_id) DO NOTHING RETURNING case_id"),
                         {"alert_id": selected_alert_id},
@@ -769,6 +808,68 @@ with model_tab:
                 safe_table(matrix_df.rename_axis("Actual / predicted").reset_index())
             else:
                 st.info("The saved report has aggregate test metrics but no row-level test predictions. Run `python ml_pipeline.py --reports-only` to enable threshold inspection and interactive test-set curves.")
+
+            customer_results_path = OUTPUTS_DIR / "customer_holdout_results.csv"
+            customer_predictions_path = OUTPUTS_DIR / "customer_holdout_predictions.csv"
+            customer_metadata_path = OUTPUTS_DIR / "customer_holdout_metadata.json"
+            st.divider()
+            st.markdown("##### Customer-held-out diagnostic")
+            if customer_results_path.exists() and customer_metadata_path.exists():
+                customer_results = pd.read_csv(customer_results_path)
+                customer_metadata = json.loads(
+                    customer_metadata_path.read_text(encoding="utf-8")
+                )
+                st.caption(
+                    f"{customer_metadata.get('split_description', 'Customer-disjoint split')} "
+                    f"Test rows: {customer_metadata.get('test_rows', 'unknown')} · "
+                    f"Held-out customers: {customer_metadata.get('test_customers', 'unknown')}"
+                )
+                st.warning(
+                    "This is a harder split of the same simulated sample, not an independent dataset "
+                    "or evidence of real-world fraud performance."
+                )
+                safe_table(customer_results.sort_values("validation_pr_auc", ascending=False), column_config={
+                    "selected": st.column_config.CheckboxColumn("Selected by group validation"),
+                    "validation_pr_auc": st.column_config.ProgressColumn("Validation PR-AUC", min_value=0, max_value=1, format="%.3f"),
+                    "precision": st.column_config.ProgressColumn("Test precision @ 0.50", min_value=0, max_value=1, format="%.3f"),
+                    "recall": st.column_config.ProgressColumn("Test recall @ 0.50", min_value=0, max_value=1, format="%.3f"),
+                    "f1": st.column_config.ProgressColumn("Test F1 @ 0.50", min_value=0, max_value=1, format="%.3f"),
+                    "roc_auc": st.column_config.ProgressColumn("Test ROC-AUC", min_value=0, max_value=1, format="%.3f"),
+                    "pr_auc": st.column_config.ProgressColumn("Test PR-AUC", min_value=0, max_value=1, format="%.3f"),
+                })
+                if customer_predictions_path.exists():
+                    customer_predictions = pd.read_csv(customer_predictions_path)
+                    group_selected = customer_metadata.get("selected_model")
+                    if (
+                        "y_true" in customer_predictions
+                        and group_selected in customer_predictions
+                        and len(np.unique(customer_predictions["y_true"])) > 1
+                    ):
+                        group_precision, group_recall, _ = precision_recall_curve(
+                            customer_predictions["y_true"].astype(int),
+                            customer_predictions[group_selected].astype(float),
+                        )
+                        group_pr_data = pd.DataFrame(
+                            {"recall": group_recall, "precision": group_precision}
+                        )
+                        group_pr_chart = alt.Chart(group_pr_data).mark_line(
+                            color=COLORS["teal"], strokeWidth=2
+                        ).encode(
+                            x=alt.X("recall:Q", title="Recall", scale=alt.Scale(domain=[0, 1])),
+                            y=alt.Y("precision:Q", title="Precision", scale=alt.Scale(domain=[0, 1])),
+                            tooltip=[
+                                alt.Tooltip("recall:Q", format=".3f"),
+                                alt.Tooltip("precision:Q", format=".3f"),
+                            ],
+                        )
+                        st.caption(f"Selected on customer-held-out validation: {group_selected}")
+                        st.markdown("###### Held-out customer precision–recall curve")
+                        show_chart(group_pr_chart, height=260)
+            else:
+                st.info(
+                    "This diagnostic has not been generated yet. Run the report-only pipeline "
+                    "to add customer-disjoint metrics without changing database scores, alerts, or cases."
+                )
 
             feature_importance_path = OUTPUTS_DIR / "feature_importance.png"
             if feature_importance_path.exists():

@@ -1,0 +1,13 @@
+{
+  "split_description": "Stratified customer-disjoint 60/20/20-style train/validation/test partition. No customer appears in more than one partition; group sizes make exact row fractions approximate.",
+  "selected_model": "RandomForest",
+  "random_state": 42,
+  "threshold": 0.5,
+  "train_rows": 6000,
+  "validation_rows": 2000,
+  "test_rows": 2000,
+  "train_customers": 548,
+  "validation_customers": 187,
+  "test_customers": 179,
+  "dataset_scope": "Single simulated transaction sample; this is not independent real-world validation."
+}

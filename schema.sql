@@ -6,7 +6,7 @@
 -- =====================================================================
 
 DROP VIEW  IF EXISTS v_fraud_by_category, v_customer_risk_summary, v_open_alerts CASCADE;
-DROP TABLE IF EXISTS loan_payment, loan, investigation, risk_score, fraud_alert,
+DROP TABLE IF EXISTS investigation_history, loan_payment, loan, investigation, risk_score, fraud_alert,
                      transaction, device, location, merchant, card, account, customer CASCADE;
 
 -- ---------------------------------------------------------------------

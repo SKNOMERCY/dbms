@@ -14,15 +14,15 @@ Open `ER_DIAGRAM.md`, then run the row-count query at the top of `queries.sql`. 
 
 ### 1:30–2:30 — Database behavior
 
-Open `advanced_db.sql`. Explain that the high-risk views and customer-risk function support analyst queries. Show the investigation trigger: resolving a case stamps `resolved_at` and updates the linked alert; reopening it clears the timestamp and returns the alert to review. The trigger demonstration is wrapped in a transaction and rolled back.
+Open `advanced_db.sql`. Explain that the high-risk views and customer-risk function support analyst queries. Show the investigation triggers: resolving a case stamps `resolved_at`, updates the linked alert, and records a reasoned event; reopening clears the timestamp, returns the alert to review, and adds another event. The SQL trigger demonstration is wrapped in a transaction and rolled back. The dashboard-entered analyst name is self-reported, not authenticated.
 
 ### 2:30–3:30 — Modeling
 
-Open `outputs/model_results.csv`. Explain that model choice uses validation PR-AUC, while final comparison uses a separate held-out test split. The recorded Random Forest result is 0.948 validation PR-AUC and 0.962 test PR-AUC on this sample. Explain that PR-AUC is useful for an imbalanced label, and that transaction-level splitting does not prove performance on unseen customers or future data.
+Open `outputs/model_results.csv`. Explain that model choice uses validation PR-AUC, while final comparison uses a separate held-out test split. The transaction-random report records 0.948 validation PR-AUC and 0.962 test PR-AUC. The supplementary customer-disjoint report selects Random Forest at 0.954 validation PR-AUC and records 0.962 test PR-AUC, with 179 customers held out. Both use the same simulated sample; neither establishes performance on another dataset or future transactions.
 
 ### 3:30–4:30 — Dashboard
 
-Open the dashboard and show its shared date/category/amount/risk/alert/case filters, KPI definitions, and interactive overview. In **Transactions**, search and page through records, inspect actual score, model, alert, and case fields, and demonstrate CSV export. In **Investigations**, show an alert without a case, then create, resolve, or reopen one on a demo/test database. In **Model evaluation**, move the operating threshold and explain that it changes test-set metrics only; it does not rewrite stored alerts.
+Open the dashboard and show its shared date/category/amount/risk/alert/case filters, KPI definitions, and interactive overview. In **Transactions**, search and page through records, inspect actual score, model, alert, and case fields, and demonstrate CSV export. In **Investigations**, show an alert without a case, then create, resolve, or reopen one on a demo/test database and review the stored actor name, reason, timestamp, and outcome transition in case history. In **Model evaluation**, move the operating threshold and explain that it changes test-set metrics only; it does not rewrite stored alerts.
 
 ### 4:30–5:00 — Close
 
@@ -30,15 +30,15 @@ Open the dashboard and show its shared date/category/amount/risk/alert/case filt
 
 ## Resume bullet
 
-Built FinGuard AI, an end-to-end PostgreSQL, Python, scikit-learn, and Streamlit fraud analytics prototype over 10,000 simulated transactions; designed a 12-table schema with constraints, views, indexes, a SQL function, and trigger-driven case resolution; implemented leakage-aware model comparison and an analyst dashboard, with Random Forest achieving 0.962 held-out test PR-AUC on the sample.
+Built FinGuard AI, an end-to-end PostgreSQL, Python, scikit-learn, and Streamlit fraud analytics prototype over 10,000 simulated transactions; designed a 12-table schema with constraints, views, indexes, a SQL function, and trigger-driven case resolution; implemented leakage-aware model comparison and an analyst dashboard, with Random Forest achieving 0.962 held-out test PR-AUC on both transaction-random and customer-disjoint splits of the sample. The second split keeps customers separate across train, validation, and test partitions; both results remain sample-specific.
 
 ## LinkedIn project post
 
 I built FinGuard AI, a fraud analytics prototype that brings database design, machine learning, and an analyst dashboard into one project.
 
-The project uses PostgreSQL for a 12-table relational model, Python and scikit-learn to compare transaction-risk models, and Streamlit for transaction exploration and investigation review. I also added SQL views, a customer-risk function, trigger-driven case updates, safe CSV export, and tests for key workflow behavior.
+The project uses PostgreSQL for a 12-table relational model, Python and scikit-learn to compare transaction-risk models, and Streamlit for transaction exploration and investigation review. I also added SQL views, a customer-risk function, reasoned investigation history, customer-disjoint evaluation, safe CSV export, and GitHub Actions tests against disposable PostgreSQL.
 
-On the included 10,000-row simulated dataset, the Random Forest reached 0.948 validation PR-AUC and 0.962 held-out test PR-AUC. These are sample-specific results, not a claim about production fraud detection.
+On the included 10,000-row simulated dataset, Random Forest reached 0.948 validation PR-AUC and 0.962 held-out test PR-AUC on the transaction-random split. On a customer-disjoint split, it reached 0.954 validation PR-AUC and 0.962 held-out test PR-AUC, with 179 customers held out. Both results are sample-specific and do not establish real-world fraud performance.
 
 This project helped me practice connecting database integrity, model evaluation, and a useful analyst workflow. Feedback is welcome.
 
@@ -54,7 +54,7 @@ Five sample-data screenshots are included in [`README.md`](README.md#dashboard-s
 4. [Investigations and cases](docs/screenshots/04-investigations.png)
 5. [Model evaluation](docs/screenshots/05-model-evaluation.png)
 
-The screenshots document the dashboard views; the live app was not opened in a browser during this review. Use a disposable database when demonstrating case actions.
+These authentic screenshots predate the case-history and customer-held-out panels. Capture fresh images from the updated dashboard before presenting those additions. Use a disposable database when demonstrating case actions.
 
 Use sample records only. Do not include local database credentials, terminal history, or private account information in screenshots.
 
@@ -69,9 +69,10 @@ Use sample records only. Do not include local database credentials, terminal his
 7. **What does the 0.962 test PR-AUC mean?** It describes ranking performance on the held-out portion of this simulated sample under the selected split. It does not establish production performance or generalization to new customers.
 8. **How do you reduce leakage in database scoring?** The pipeline uses out-of-fold predictions for supervised-model scores written to the database, and customer aggregates calculated across the full dataset are excluded from those features.
 9. **What is the role of Isolation Forest?** It provides an unsupervised anomaly-detection baseline, which is compared with supervised models using the same held-out labels for evaluation.
-10. **Why use a composite index?** The query filters by merchant and timestamp together. The composite index can apply both predicates in the index; the measured single-run latency was noisy and did not prove a speedup on 10,000 rows.
-11. **How would you evaluate this for production?** Use time-based splits, a second independent dataset, customer-level holdouts, calibration and threshold analysis, cost-weighted metrics, drift monitoring, and human review controls.
-12. **How do you prevent accidental data deletion?** The loader requires `--reset` and an explicit typed confirmation. Automation requires the additional `--yes` flag.
-13. **What happens if a database load fails?** Schema recreation and data inserts run in one database transaction; the connection context rolls back on failure and the connection closes in `finally`.
-14. **Why neutralize CSV values?** Spreadsheet applications may interpret cells beginning with formula markers as executable formulas. Text cells are prefixed before export; numeric values remain numeric.
-15. **What would you improve next?** Add a time-separated external evaluation, capture dashboard screenshots, benchmark indexes repeatedly on a larger dataset, and add deployment configuration and monitoring only after validating the workflow.
+10. **What does customer-disjoint evaluation add?** It keeps every customer entirely within train, validation, or test, so the test portion represents unseen customers from this same simulated sample. It is still not an independent dataset or real-world validation.
+11. **Why use a composite index?** The query filters by merchant and timestamp together. The composite index can apply both predicates in the index; the measured single-run latency was noisy and did not prove a speedup on 10,000 rows.
+12. **How would you evaluate this for production?** Use time-based splits, a second independent dataset, customer-level holdouts, calibration and threshold analysis, cost-weighted metrics, drift monitoring, and human review controls.
+13. **How do you prevent accidental data deletion?** The loader requires `--reset` and an explicit typed confirmation. Automation requires the additional `--yes` flag.
+14. **What happens if a database load fails?** Schema recreation and data inserts run in one database transaction; the connection context rolls back on failure and the connection closes in `finally`.
+15. **Why neutralize CSV values?** Spreadsheet applications may interpret cells beginning with formula markers as executable formulas. Text cells are prefixed before export; numeric values remain numeric.
+16. **What would you improve next?** Add a time-separated external evaluation, capture dashboard screenshots, benchmark indexes repeatedly on a larger dataset, and add deployment configuration and monitoring only after validating the workflow.

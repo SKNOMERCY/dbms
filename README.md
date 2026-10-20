@@ -6,11 +6,11 @@ The included sample has **10,000 transactions**, including **700 dataset-labeled
 
 ## Project highlights
 
-- **Relational design:** 12 PostgreSQL tables with primary keys, foreign keys, domain constraints, indexes, views, a function, and an investigation trigger.
-- **Fraud scoring:** Logistic Regression, Random Forest, and Isolation Forest compared with validation PR-AUC; the refreshed Random Forest report records 0.948 validation PR-AUC and 0.962 held-out test PR-AUC on this sample.
-- **Investigation workflow:** risk scores create model alerts and high-risk cases; resolving a case updates its linked alert in the database.
+- **Relational design:** 12 core PostgreSQL tables with primary and foreign keys, domain constraints, indexes, views, and a function; the advanced SQL setup adds a case-history ledger and triggers.
+- **Fraud scoring:** Logistic Regression, Random Forest, and Isolation Forest selected by validation PR-AUC; both transaction-random and customer-disjoint reports are included, with the latter holding out entire customers from the same simulated sample.
+- **Investigation workflow:** risk scores create model alerts and high-risk cases; case creation, resolution, and reopening record an analyst-entered name, reason, and outcome transition in a database history ledger. Analyst names are self-reported, not authenticated identities.
 - **Analyst dashboard:** shared date, category, amount, score, risk-band, alert, and case-outcome filters; a dark navy operations workspace; paginated transaction search and evidence details; customer profiles; case creation, resolution, and reopening; model evaluation; and safe CSV export.
-- **Reproducible sample data:** the loader uses a fixed random seed for generated account, device, and loan fields.
+- **Reproducibility and CI:** deterministic customer-disjoint evaluation, unit tests, and PostgreSQL integration tests run in GitHub Actions against a disposable PostgreSQL 16 service.
 
 ## Data flow
 
@@ -35,9 +35,9 @@ These charts show recorded sample labels by category and hour. They describe the
 
 ## Portfolio summary
 
-> Built FinGuard AI, a PostgreSQL-backed fraud analytics project that models transaction risk and supports case review. Designed a 12-table relational schema with constraints, indexes, views, a SQL function, and a trigger; implemented a reproducible Python pipeline to compare supervised and unsupervised models; and built a Streamlit dashboard for transaction exploration, investigation outcomes, customer risk profiles, and CSV exports. The refreshed Random Forest report achieved 0.948 validation PR-AUC and 0.962 PR-AUC on a separate held-out test split of the 10,000-row sample.
+> Built FinGuard AI, a PostgreSQL-backed fraud analytics project that models transaction risk and supports case review. Designed a 12-table relational schema with constraints, indexes, views, a SQL function, and a trigger; implemented a reproducible Python pipeline to compare supervised and unsupervised models; and built a Streamlit dashboard for transaction exploration, investigation outcomes, customer risk profiles, and CSV exports. The transaction-random Random Forest report achieved 0.948 validation PR-AUC and 0.962 held-out test PR-AUC. A second customer-disjoint split selected Random Forest at 0.954 validation PR-AUC and recorded 0.962 held-out test PR-AUC, with 179 customers held out. Both are results on the same simulated sample, not independent validation.
 
-The reports in `outputs/` were refreshed on 2026-10-21 using the current evaluation code; the report-only mode leaves database scores, alerts, and investigations unchanged. The local PowerPoint draft is excluded from GitHub until its screenshot placeholders are resolved. This is a prototype evaluated on one sample dataset, not a production fraud prevention system.
+The reports in `outputs/` include a transaction-random split and a supplementary customer-disjoint diagnostic, both refreshed on 2026-10-21 using the current evaluation code. The report-only mode leaves database scores, alerts, and investigations unchanged. The local PowerPoint draft is excluded from GitHub until its screenshot placeholders are resolved. This is a prototype evaluated on one sample dataset, not a production fraud prevention system.
 
 ## Dataset and scope
 
@@ -45,7 +45,7 @@ The included 10,000-row CSV is a sample from the [Credit Card Transactions Fraud
 
 ## Database design and query examples
 
-The schema separates customers, accounts, cards, merchants, devices, locations, transactions, loans, payments, scores, alerts, and investigations. Primary and foreign keys model relationships; `CHECK`, `UNIQUE`, and `NOT NULL` constraints protect valid values; views provide category and customer summaries. `advanced_db.sql` adds analyst views, a stable SQL function, and a trigger that keeps a case's resolution timestamp and linked alert status in sync. See [ER_DIAGRAM.md](ER_DIAGRAM.md) for the entity relationship diagram.
+The schema separates customers, accounts, cards, merchants, devices, locations, transactions, loans, payments, scores, alerts, and investigations. Primary and foreign keys model relationships; `CHECK`, `UNIQUE`, and `NOT NULL` constraints protect valid values; views provide category and customer summaries. `advanced_db.sql` adds analyst views, a stable SQL function, triggers that keep a case's resolution timestamp and linked alert status in sync, and an append-only event ledger for case creation, resolution, and reopening. The dashboard supplies a self-reported analyst display name and required reason for these actions; this is traceability, not authentication or tamper-proof auditing. See [ER_DIAGRAM.md](ER_DIAGRAM.md) for the entity relationship diagram.
 
 `queries.sql` is a compact walkthrough of the relational concepts used in the project: multi-table joins, aggregation, a subquery, a window function, loan risk analysis, constraint checks, and an ACID transaction example that rolls back. Run its row-count query to inspect all 12 tables.
 
@@ -180,11 +180,11 @@ The local dashboard URL printed by Streamlit is normally `http://localhost:8501`
 ## Demo walkthrough
 
 1. Show the populated database using the row-count query in `queries.sql` and point out the customer, account, merchant, transaction, and loan entities.
-2. Run `SELECT * FROM v_fraud_by_category ORDER BY fraud_pct DESC;`. In the current database, `shopping_net` is 19.16%, `grocery_pos` is 15.54%, and `kids_pets` is 2.37%.
+2. Run `SELECT * FROM v_fraud_by_category ORDER BY fraud_pct DESC;`. These are descriptive dataset summaries, not live fraud rates.
 3. Run the hour-of-day query from `queries.sql`. The current fraud counts are highest at hour 22 (185) and hour 23 (173).
-4. Review the refreshed `outputs/model_results.csv`. Explain that validation PR-AUC selects the model while the separate test set supplies the final comparison. To refresh the artifacts after changing the data or model code, run `ml_pipeline.py --reports-only`; run without that flag only when you intend to replace database scores, alerts, and investigations.
+4. Review the refreshed `outputs/model_results.csv` and `outputs/customer_holdout_results.csv`. Explain that validation PR-AUC selects the model while the separate test set supplies the final comparison. To refresh the artifacts after changing the data or model code, run `ml_pipeline.py --reports-only`; run without that flag only when you intend to replace database scores, alerts, and investigations.
 5. Open the confusion-matrix, ROC, precision-recall, feature-importance, and fraud-analysis files in `outputs/`.
-6. Run `advanced_db.sql` and show its views, function, indexes, demo queries, and rollback-safe trigger example.
+6. Run `advanced_db.sql` and show its views, function, indexes, case-history table, demo queries, and rollback-safe trigger example.
 7. Start the dashboard. Use the shared date, category, amount, score, risk, alert, and case filters to explore the overview. Open **Transactions** to search by transaction, customer, merchant, or category, page through results, inspect linked evidence, and export the current page as CSV.
 8. Open **Customer lookup** and look up a customer ID (for example `1`) to review the aggregate risk summary and highest-scored transactions. **Model performance** shows the saved model comparison and evaluation charts under `outputs/`; regenerate them after changes to the data or pipeline.
 9. In **Investigations**, create a case from an unassigned alert, resolve a pending case as `FRAUD` or `NOT_FRAUD`, or reopen a resolved case. Confirm the database update before saving; the trigger synchronizes alert status and resolution time. These actions write to the database, so demonstrate them using a disposable/demo database.
@@ -213,6 +213,14 @@ The five screenshots below show the real Streamlit dashboard with sample data. T
 
 ![Selected model, held-out metrics, and operating threshold](docs/screenshots/05-model-evaluation.png)
 
+Saved evaluation curves are available as report charts:
+
+![Precision-recall curves for the transaction-random evaluation](outputs/precision_recall_curve.png)
+
+![ROC curves for the transaction-random evaluation](outputs/roc_curve.png)
+
+The five dashboard screenshots predate the latest case-history and customer-held-out panels. They are authentic earlier captures; reopen the dashboard after installing `advanced_db.sql` and replace them with fresh captures to show the new panels.
+
 ## Tests
 
 Install development dependencies and run the unit suite:
@@ -222,7 +230,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-The unit tests cover CSV formula-injection protection, feature preparation and split boundaries, shared filter construction, risk-band thresholds, operating-point metrics, safe database-error messaging, and loader reset safeguards. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` points to a disposable test database. They create an isolated schema and roll back the schema and test rows. Set that variable in the current shell to include those checks; do not point it at a database containing data you need.
+The unit tests cover CSV formula-injection protection, feature preparation and split boundaries, shared filter construction, risk-band thresholds, operating-point metrics, safe database-error messaging, and loader reset safeguards. PostgreSQL integration tests are skipped locally unless `TEST_DATABASE_URL` points to a disposable test database. GitHub Actions provisions a dedicated `finguard_test` PostgreSQL 16 service, runs both unit and integration tests, and destroys the service at job end. The integration tests create a uniquely named schema and roll back test rows. Set that variable in the current shell to include those checks; do not point it at a database containing data you need.
 
 ## Troubleshooting
 
@@ -234,9 +242,9 @@ The unit tests cover CSV formula-injection protection, feature preparation and s
 ## Notes and limitations
 
 - `risk_score.score_value` and `fraud_alert.risk_score` use a 0–100 scale. `risk_level` is derived by the pipeline/dashboard and is not a base-table column.
-- The base schema defines `investigation.outcome` (`PENDING`, `FRAUD`, `NOT_FRAUD`), not an investigation `status` column. `advanced_db.sql` adds `resolved_at` and synchronizes the linked alert status for resolved outcomes.
-- The pipeline uses out-of-fold model predictions for the supervised model's database scores. Customer-level aggregates calculated across the full dataset have been removed to avoid sharing information across folds. Model choice uses a validation split, separate from the final test split. Evaluation uses random transaction-level splits, so it measures held-out transactions from the sampled customer population; it does not establish performance for unseen customers or a separate dataset.
+- The base schema defines `investigation.outcome` (`PENDING`, `FRAUD`, `NOT_FRAUD`), not an investigation `status` column. `advanced_db.sql` adds `resolved_at`, synchronizes linked alert status, and installs `investigation_history` for case creation, resolution, and reopening. The event reason and display name are provided by the dashboard; no user authentication is implemented.
+- The pipeline uses out-of-fold model predictions for the supervised model's database scores. Customer-level aggregates calculated across the full dataset have been removed to avoid sharing information across folds. Model choice uses validation data separate from the final test split. The main report uses a random transaction-level split. A supplementary stratified customer-disjoint split keeps each customer in exactly one partition and provides a diagnostic for unseen customers within this same simulated sample; it does not establish performance on an independent or real-world dataset.
 - No deployment, production monitoring, or independent evaluation on a second dataset is documented in this project.
-- The evaluation dashboard's operating-point slider is an analytical view of saved held-out predictions; changing it does not rewrite database alerts. The database alert threshold remains 0.50 and investigation threshold remains 0.80 in normalized score units.
+- The evaluation dashboard shows the random split and customer-disjoint diagnostic from saved artifacts. Its operating-point slider is an analytical view of saved held-out predictions; changing it does not rewrite database alerts. The database alert threshold remains 0.50 and investigation threshold remains 0.80 in normalized score units.
 - Generated account, device, income, and loan attributes are synthetic; they support the DBMS demonstration and are not observations from the source CSV.
 - PostgreSQL integration checks require an explicitly configured test connection; the standard unit suite does not modify a database.
