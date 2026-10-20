@@ -76,7 +76,7 @@ $function$;
 SELECT * FROM get_customer_risk((SELECT MIN(customer_id) FROM customer));
 
 -- 5. Close investigations by outcome and synchronize their linked alert.
--- RUN: Add investigation resolved timestamp
+-- RUN: Ensure investigation resolved timestamp exists (already in fresh schema)
 ALTER TABLE investigation ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP;
 -- RUN: Create investigation outcome trigger function
 CREATE OR REPLACE FUNCTION sync_investigation_resolution()
@@ -92,6 +92,11 @@ BEGIN
                          WHEN 'FRAUD' THEN 'CONFIRMED_FRAUD'
                          ELSE 'FALSE_POSITIVE'
                      END
+        WHERE alert_id = NEW.alert_id;
+    ELSIF NEW.outcome = 'PENDING' AND OLD.outcome IS DISTINCT FROM NEW.outcome THEN
+        NEW.resolved_at := NULL;
+        UPDATE fraud_alert
+        SET status = 'UNDER_REVIEW'
         WHERE alert_id = NEW.alert_id;
     END IF;
     RETURN NEW;

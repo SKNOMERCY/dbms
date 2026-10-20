@@ -43,6 +43,16 @@ The reports in `outputs/` were refreshed on 2026-10-21 using the current evaluat
 
 The included 10,000-row CSV is a sample from the [Credit Card Transactions Fraud Detection dataset on Kaggle](https://www.kaggle.com/datasets/kartik2112/fraud-detection), generated with the [Sparkov Data Generation tool](https://github.com/namebrandon/Sparkov_Data_Generation). The source dataset is simulated; its card numbers and identity fields are synthetic. This project uses the sample for coursework and demonstration, and the reported metrics should not be read as expected real-world fraud performance. The project code is MIT licensed; the dataset remains subject to its source terms.
 
+## Database design and query examples
+
+The schema separates customers, accounts, cards, merchants, devices, locations, transactions, loans, payments, scores, alerts, and investigations. Primary and foreign keys model relationships; `CHECK`, `UNIQUE`, and `NOT NULL` constraints protect valid values; views provide category and customer summaries. `advanced_db.sql` adds analyst views, a stable SQL function, and a trigger that keeps a case's resolution timestamp and linked alert status in sync. See [ER_DIAGRAM.md](ER_DIAGRAM.md) for the entity relationship diagram.
+
+`queries.sql` is a compact walkthrough of the relational concepts used in the project: multi-table joins, aggregation, a subquery, a window function, loan risk analysis, constraint checks, and an ACID transaction example that rolls back. Run its row-count query to inspect all 12 tables.
+
+### Index evidence
+
+`advanced_db.sql` runs `EXPLAIN ANALYZE` for a merchant-and-time transaction lookup before and after creating a composite index. In a local run on the 10,000-row sample, PostgreSQL used the existing timestamp index and filtered by merchant before the composite index; afterward it used both composite-index conditions. One run reported 0.052 ms before and 0.065 ms after, which is too small and cache-sensitive to claim a speedup. The useful evidence is the plan shape: the composite index satisfies both predicates. Recheck plans and repeated timings on your own PostgreSQL instance and larger data before keeping an index for performance.
+
 ## Tech stack
 
 - PostgreSQL for relational storage, constraints, indexes, views, a function, and a trigger.
@@ -83,7 +93,7 @@ dbms/
 └── sparkov_sample_10000.csv
 ```
 
-`load_data.py` reads `sparkov_sample_10000.csv` from the project directory, even when the script is launched from another working directory.
+`load_data.py` reads `sparkov_sample_10000.csv` from the project directory, even when the script is launched from another working directory. `.env.example` documents local settings; `.env` is ignored by Git.
 
 ## Setup
 
@@ -97,7 +107,7 @@ CREATE DATABASE finguard;
 
 ### 2. Configure credentials and connection settings
 
-All scripts accept `PGPASSWORD` as the shared PostgreSQL password. The dashboard and ML pipeline also accept `DB_PASSWORD` for compatibility with earlier setup. Set `PGPASSWORD` using Windows **Environment Variables**, then open a new terminal/VS Code window so it sees the updated value. No password is embedded in the source. Do not commit passwords or place them in this README.
+Copy `.env.example` to `.env` and set `PGPASSWORD` to your local PostgreSQL password. The dashboard and ML pipeline also accept `DB_PASSWORD` for compatibility with earlier setup. `.env` is excluded from Git. Never commit real credentials.
 
 Optional connection variables used by the scripts are `PGHOST` (default `localhost`), `PGPORT` (default `5432`), `PGDATABASE` (default `finguard`), and `PGUSER` (default `postgres`). Configure these consistently for all scripts if your local PostgreSQL settings differ.
 
@@ -111,6 +121,8 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
+Install the optional test dependency with `python -m pip install -r requirements-dev.txt`.
+
 If PowerShell blocks environment activation, use the environment's Python directly, for example:
 
 ```powershell
@@ -122,10 +134,10 @@ If PowerShell blocks environment activation, use the environment's Python direct
 Run this from the project folder:
 
 ```powershell
-python load_data.py
+python load_data.py --reset
 ```
 
-This reads the sample CSV and creates/populates the schema. **Warning:** `schema.sql`, which the loader executes, drops and recreates the existing project tables and views. Running the loader again replaces those tables and their data, including scores, alerts, investigations, and advanced database objects; it is not a non-destructive refresh.
+The loader asks you to type `RESET` before it drops and recreates the project tables and views. It will not run without `--reset`; for deliberate non-interactive use, pass both `--reset --yes`. This replaces project data, including scores, alerts, and investigations. Reapply `advanced_db.sql` after a reset.
 
 ### 5. Train models and write scores
 
@@ -171,9 +183,22 @@ The local dashboard URL printed by Streamlit is normally `http://localhost:8501`
 8. Open **Customer lookup** and look up a customer ID (for example `1`) to review the aggregate risk summary and highest-scored transactions. **Model performance** shows the saved model comparison and evaluation charts under `outputs/`; regenerate them after changes to the data or pipeline.
 9. In **Investigations**, select a case and choose `FRAUD` or `NOT_FRAUD`. Confirm the database update before saving; the trigger synchronizes the associated alert status and resolution timestamp. This action updates database records, so only use it when you intend to change that case.
 
+## Tests
+
+Install development dependencies and run the unit suite:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+The unit tests cover CSV formula-injection protection, feature preparation and train/validation/test boundaries, and the loader's reset safeguards. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` points to a disposable test database. They create an isolated schema and roll back the schema and test rows. Set that variable in the current shell to include the integration checks; do not point it at a database containing data you need.
+
 ## Notes and limitations
 
 - `risk_score.score_value` and `fraud_alert.risk_score` use a 0–100 scale. `risk_level` is derived by the pipeline/dashboard and is not a base-table column.
 - The base schema defines `investigation.outcome` (`PENDING`, `FRAUD`, `NOT_FRAUD`), not an investigation `status` column. `advanced_db.sql` adds `resolved_at` and synchronizes the linked alert status for resolved outcomes.
 - The pipeline uses out-of-fold model predictions for the supervised model's database scores. Customer-level aggregates calculated across the full dataset have been removed to avoid sharing information across folds. Model choice uses a validation split, separate from the final test split. Evaluation uses random transaction-level splits, so it measures held-out transactions from the sampled customer population; it does not establish performance for unseen customers or a separate dataset.
 - No deployment, production monitoring, or independent evaluation on a second dataset is documented in this project.
+- Generated account, device, income, and loan attributes are synthetic; they support the DBMS demonstration and are not observations from the source CSV.
+- PostgreSQL integration checks require an explicitly configured test connection; the standard unit suite does not modify a database.

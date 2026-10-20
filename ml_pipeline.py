@@ -13,12 +13,14 @@ Run:      python ml_pipeline.py [--reports-only]
 
 import argparse
 import os
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from sklearn.model_selection import StratifiedKFold, cross_val_predict, train_test_split
@@ -30,21 +32,26 @@ from sklearn.metrics import (precision_score, recall_score, f1_score,
                              roc_auc_score, average_precision_score,
                              confusion_matrix, precision_recall_curve, roc_curve)
 
+PROJECT_DIR = Path(__file__).resolve().parent
+load_dotenv(PROJECT_DIR / ".env", override=False)
+
 # ======================================================================
 # CONFIG
 # ======================================================================
-DB_PASSWORD = os.getenv("PGPASSWORD") or os.getenv("DB_PASSWORD")
-if not DB_PASSWORD:
-    raise RuntimeError("Set PGPASSWORD before running this script. DB_PASSWORD is also accepted for compatibility.")
-
-DB_URL = URL.create(
-    "postgresql+psycopg2",
-    username=os.getenv("PGUSER", "postgres"),
-    password=DB_PASSWORD,
-    host=os.getenv("PGHOST", "localhost"),
-    port=int(os.getenv("PGPORT", "5432")),
-    database=os.getenv("PGDATABASE", "finguard"),
-)
+def get_engine():
+    """Create a PostgreSQL engine only when a database operation is requested."""
+    password = os.getenv("PGPASSWORD") or os.getenv("DB_PASSWORD")
+    if not password:
+        raise RuntimeError("Set PGPASSWORD before running the pipeline. DB_PASSWORD is also accepted for compatibility.")
+    url = URL.create(
+        "postgresql+psycopg2",
+        username=os.getenv("PGUSER", "postgres"),
+        password=password,
+        host=os.getenv("PGHOST", "localhost"),
+        port=int(os.getenv("PGPORT", "5432")),
+        database=os.getenv("PGDATABASE", "finguard"),
+    )
+    return create_engine(url, pool_pre_ping=True)
 # Coordinates are joined from location to return the model's expected columns.
 #   transaction_id, customer_id, amount, trans_time, is_fraud,
 #   cust_lat, cust_long, merch_lat, merch_long, category, dob
@@ -75,11 +82,9 @@ RANDOM_STATE = 42
 ALERT_THRESHOLD = 0.50   # risk score >= this creates a fraud_alert
 HIGH_THRESHOLD = 0.80    # risk score >= this also opens an investigation
 
-engine = create_engine(DB_URL)
-
-
 # ---------------------------------------------------------------- 1. LOAD
-def load_data():
+def load_data(engine=None):
+    engine = engine or get_engine()
     df = pd.read_sql(EXTRACT_SQL, engine)
     df["trans_time"] = pd.to_datetime(df["trans_time"])
     df["dob"] = pd.to_datetime(df["dob"])
@@ -198,7 +203,8 @@ def train_and_compare(X, y):
 
 
 # ------------------------------------------------------------- 3B. OUTPUTS
-def save_outputs(results, models, evaluation):
+def save_outputs(results, models, evaluation, engine=None):
+    engine = engine or get_engine()
     output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -313,7 +319,8 @@ def level(score):
     return "HIGH" if score >= HIGH_THRESHOLD else "MEDIUM" if score >= ALERT_THRESHOLD else "LOW"
 
 
-def write_results(df, X, best_name, scorer, best_model):
+def write_results(df, X, best_name, scorer, best_model, engine=None):
+    engine = engine or get_engine()
     if best_name == "IsolationForest":
         scores = scorer(X)
     else:
@@ -364,13 +371,17 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    data = load_data()
-    features = build_features(data)
-    best_name, best_scorer, best_model, results, models, evaluation = train_and_compare(
-        features, data["is_fraud"]
-    )
-    save_outputs(results, models, evaluation)
-    if args.reports_only:
-        print("Reports refreshed; database risk scores, alerts, and investigations were not changed.")
-    else:
-        write_results(data, features, best_name, best_scorer, best_model)
+    db_engine = get_engine()
+    try:
+        data = load_data(db_engine)
+        features = build_features(data)
+        best_name, best_scorer, best_model, results, models, evaluation = train_and_compare(
+            features, data["is_fraud"]
+        )
+        save_outputs(results, models, evaluation, db_engine)
+        if args.reports_only:
+            print("Reports refreshed; database risk scores, alerts, and investigations were not changed.")
+        else:
+            write_results(data, features, best_name, best_scorer, best_model, db_engine)
+    finally:
+        db_engine.dispose()

@@ -104,10 +104,12 @@ CREATE TABLE investigation (                                 -- 1 : 0/1 with fra
     case_id      SERIAL PRIMARY KEY,
     alert_id     INTEGER NOT NULL UNIQUE REFERENCES fraud_alert(alert_id) ON DELETE CASCADE,
     opened_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-    closed_at    TIMESTAMP,
+    resolved_at  TIMESTAMP,
     outcome      VARCHAR(20) NOT NULL DEFAULT 'PENDING'
                  CHECK (outcome IN ('PENDING', 'FRAUD', 'NOT_FRAUD')),
-    CHECK (closed_at IS NULL OR closed_at >= opened_at)
+    CHECK (resolved_at IS NULL OR resolved_at >= opened_at),
+    CHECK ((outcome = 'PENDING' AND resolved_at IS NULL)
+        OR (outcome IN ('FRAUD', 'NOT_FRAUD') AND resolved_at IS NOT NULL))
 );
 
 -- ---------------------------------------------------------------------
@@ -128,7 +130,8 @@ CREATE TABLE loan_payment (
     loan_id     INTEGER NOT NULL REFERENCES loan(loan_id) ON DELETE CASCADE,
     amount      NUMERIC(12,2) NOT NULL CHECK (amount > 0),
     due_date    DATE NOT NULL,
-    paid_date   DATE                                         -- NULL = not paid yet
+    paid_date   DATE,                                        -- NULL = not paid yet
+    UNIQUE (loan_id, due_date)
 );
 
 -- ---------------------------------------------------------------------

@@ -11,7 +11,10 @@ SELECT 'device', COUNT(*) FROM device UNION ALL
 SELECT 'location', COUNT(*) FROM location UNION ALL
 SELECT 'transaction', COUNT(*) FROM transaction UNION ALL
 SELECT 'loan', COUNT(*) FROM loan UNION ALL
-SELECT 'loan_payment', COUNT(*) FROM loan_payment;
+SELECT 'loan_payment', COUNT(*) FROM loan_payment UNION ALL
+SELECT 'risk_score', COUNT(*) FROM risk_score UNION ALL
+SELECT 'fraud_alert', COUNT(*) FROM fraud_alert UNION ALL
+SELECT 'investigation', COUNT(*) FROM investigation;
 
 -- 2. JOIN across 4 tables: full detail of the 10 largest fraud transactions
 SELECT t.transaction_id, c.first_name, c.last_name, m.name AS merchant,

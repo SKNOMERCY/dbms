@@ -6,12 +6,18 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import URL
 
+from app_utils import safe_csv_bytes
+
 
 st.set_page_config(page_title="FinGuard AI · Risk dashboard", page_icon="🛡️", layout="wide")
+
+PROJECT_DIR = Path(__file__).resolve().parent
+load_dotenv(PROJECT_DIR / ".env", override=False)
 
 DB_PASSWORD = os.getenv("PGPASSWORD") or os.getenv("DB_PASSWORD")
 if not DB_PASSWORD:
@@ -385,7 +391,7 @@ with transaction_tab:
         )
         st.download_button(
             "Download filtered transactions (CSV)",
-            data=transactions.to_csv(index=False).encode("utf-8"),
+            data=safe_csv_bytes(transactions),
             file_name="finguard_filtered_transactions.csv",
             mime="text/csv",
         )
@@ -474,10 +480,18 @@ with investigation_tab:
                 st.warning("Confirm the case result before saving.")
             elif submitted:
                 with engine.begin() as connection:
-                    connection.execute(
-                        text("UPDATE investigation SET outcome = :outcome WHERE case_id = :case_id"),
+                    update_result = connection.execute(
+                        text(
+                            "UPDATE investigation SET outcome = :outcome "
+                            "WHERE case_id = :case_id AND outcome = 'PENDING'"
+                        ),
                         {"outcome": new_outcome, "case_id": int(selected_case)},
                     )
+                    if update_result.rowcount != 1:
+                        st.session_state["case_update_notice"] = (
+                            "This case changed while you were reviewing it. Refresh the queue before retrying."
+                        )
+                        st.rerun()
                     updated = connection.execute(
                         text(
                             """

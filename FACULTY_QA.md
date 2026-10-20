@@ -15,6 +15,7 @@ The pipeline selects among the models using validation PR-AUC, then compares the
 ## 4. What does the investigation trigger do?
 
 When an investigation's `outcome` changes to `FRAUD` or `NOT_FRAUD`, the advanced trigger sets `resolved_at`. It also changes the linked alert status to `CONFIRMED_FRAUD` or `FALSE_POSITIVE`, respectively.
+Changing the outcome back to `PENDING` clears `resolved_at` and moves the linked alert back to `UNDER_REVIEW`.
 
 ## 5. Why does the investigation table use `outcome`, not `status`?
 
@@ -22,7 +23,7 @@ That is the real column in `schema.sql`, with allowed values `PENDING`, `FRAUD`,
 
 ## 6. What do the indexes do?
 
-Indexes help PostgreSQL find rows faster for joins and filters, such as transaction lookups by account, merchant, or timestamp and alerts by status. `risk_score.transaction_id` is already indexed through its UNIQUE constraint; `advanced_db.sql` also creates a composite transaction index for merchant-plus-timestamp filters.
+Indexes support the joins and filters used by the project, including transaction lookups by account, merchant, or timestamp and alerts by status. `risk_score.transaction_id` is already indexed through its UNIQUE constraint. In the local merchant-plus-timestamp demonstration, the existing timestamp index was used before the composite index and the composite index applied both predicates afterward; the single-run timings were too small and noisy to claim a speedup.
 
 ## 7. How was normalization applied?
 
@@ -58,4 +59,4 @@ It displays transaction volume and dataset-labeled fraud separately from model-g
 
 ## 15. What happens if you run the loader again?
 
-The loader executes `schema.sql`, which drops and recreates the project tables and base views before loading the CSV. This replaces existing database data and removes pipeline and advanced objects, so the ML pipeline and advanced SQL setup must be run again afterward.
+The loader executes `schema.sql`, which drops and recreates the project tables and base views before loading the CSV. It requires `--reset` and a typed `RESET` confirmation; non-interactive use also requires `--yes`. This replaces existing database data and removes pipeline and advanced objects, so the ML pipeline and advanced SQL setup must be run again afterward.

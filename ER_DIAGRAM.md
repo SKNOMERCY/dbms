@@ -1,6 +1,6 @@
 # FinGuard AI ER diagram
 
-The diagram below follows the 12 base tables and foreign keys defined in `schema.sql`. `advanced_db.sql` adds the `investigation.resolved_at` column at runtime; it is not part of the original `schema.sql` table definition.
+The diagram below follows the 12 base tables and foreign keys defined in `schema.sql`. Investigation resolution time is stored in `investigation.resolved_at`; the advanced SQL installs the trigger that maintains it alongside the linked alert status.
 
 ```mermaid
 erDiagram
@@ -79,7 +79,7 @@ erDiagram
         int case_id PK
         int alert_id FK, UK
         timestamp opened_at
-        timestamp closed_at
+        timestamp resolved_at
         varchar outcome
     }
     LOAN {
